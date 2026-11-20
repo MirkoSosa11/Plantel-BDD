@@ -249,7 +249,7 @@ function render(){
 }
 /* ---------- Firebase ---------- */
 const FIREBASE_CONFIG={apiKey:"AIzaSyCLL6CnhL63IybBsYUdjlIY8zt-rP1hedA",authDomain:"plantel-club.firebaseapp.com",projectId:"plantel-club",storageBucket:"plantel-club.firebasestorage.app",messagingSenderId:"769454677064",appId:"1:769454677064:web:3d13b021c52014a56ccc7d"};
-const mail=u=>u.trim().toLowerCase().replace(/[^a-z0-9._-]/g,"")+"@plantel.example.com";
+const mail=u=>u.trim().toLowerCase().replace(/[^a-z0-9._-]/g,"")+"@plantel.com";
 function loginView(){
   const u=h("input",{placeholder:"Usuario",autocomplete:"username",autocapitalize:"none"}),p=h("input",{type:"password",placeholder:"Contraseña",autocomplete:"current-password"}),msg=h("p",{class:"sub",style:"color:var(--dg)"});
   const go=async()=>{msg.textContent="";const n=u.value.trim().toLowerCase();if(!n||!p.value){msg.textContent="Completá usuario y contraseña.";return}
