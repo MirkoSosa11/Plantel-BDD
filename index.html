@@ -66,19 +66,24 @@ td input{width:70px;padding:5px 8px;text-align:center}
 </main>
 <dialog id="dlg"></dialog>
 
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-app-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-auth-compat.js"></script>
+<script src="https://www.gstatic.com/firebasejs/10.12.2/firebase-firestore-compat.js"></script>
 <script>
 const POS=["Arquero","Defensor central","Lateral derecho","Lateral izquierdo","Mediocampista defensivo","Mediocampista central","Mediocampista ofensivo","Extremo","Delantero"];
 const FORM=["4-4-2","4-3-3","4-2-3-1","3-5-2","4-5-1","5-3-2","3-4-3","4-1-4-1"];
 const CATS=["Primera","Reserva","7ma","8va","9na"];
+let fs=null,auth=null,uid=null,uname="",unsubs=[];
 let D={players:[],matches:[]},db=null,canEdit=false,local=false,v="db",cur=null,fcat="",fpos="",q="";
 const $=id=>document.getElementById(id);
 const h=(t,a={},...k)=>{const e=document.createElement(t);let val;for(const[x,y]of Object.entries(a)){if(x==="class")e.className=y;else if(x==="value")val=y;else if(x.startsWith("on"))e[x]=y;else if(y!==false&&y!=null)e.setAttribute(x,y)}for(const c of k.flat())if(c!=null&&c!==false)e.append(c);if(val!=null)e.value=val;return e};
 const pn=id=>(D.players.find(p=>p.id===id)||{}).nombre||"(eliminada)";
 const fdate=s=>s?new Date(s+"T12:00:00").toLocaleDateString("es-AR",{day:"numeric",month:"long",year:"numeric"}):"";
-const uid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
+const rid=()=>Date.now().toString(36)+Math.random().toString(36).slice(2,5);
 const persist=c=>{try{localStorage.setItem("gp_"+c,JSON.stringify(D[c]))}catch(e){}};
-async function put(c,r,quiet){const{id,...d}=r;if(local){const a=D[c],i=a.findIndex(x=>x.id===id);i>=0?a[i]=r:a.push(r);persist(c);if(!quiet)render()}else await db.collection(c).doc(id).set(d)}
-async function del(c,id){if(local){D[c]=D[c].filter(x=>x.id!==id);persist(c);render()}else await db.collection(c).doc(id).delete()}
+const col=c=>fs.collection("teams/"+uid+"/"+c);
+async function put(c,r,quiet){const{id,...d}=r;await col(c).doc(id).set(d)}
+async function del(c,id){await col(c).doc(id).delete()}
 let tm;const saveCur=()=>{clearTimeout(tm);tm=setTimeout(()=>put("matches",JSON.parse(JSON.stringify(cur)),true).catch(()=>alert("No se pudo guardar el partido.")),500)};
 function slots(f){const p=f.split("-").map(Number),n=p.length,s=[{x:50,y:9}];p.forEach((c,i)=>{const y=27+i*(62/(n-1));for(let j=0;j<c;j++)s.push({x:(j+1)/(c+1)*100,y})});return s}
 const cats=()=>[...new Set([...CATS,...D.players.map(p=>p.categoria).filter(Boolean)])];
@@ -121,7 +126,7 @@ function form(p){
     h("label",{},"Características"),f.k,
     h("div",{class:"foot"},h("button",{class:"sec",onclick:()=>$("dlg").close()},"Cancelar"),h("button",{onclick:async()=>{
       const nombre=f.n.value.trim();if(!nombre){f.n.focus();return}
-      try{await put("players",{id:p?p.id:"p"+uid(),nombre,edad:parseInt(f.a.value)||null,posicion:f.p.value,categoria:f.c.value.trim(),caracteristicas:f.k.value.trim()});$("dlg").close()}catch(e){alert("No se pudo guardar.")}}},"Guardar")));
+      try{await put("players",{id:p?p.id:"p"+rid(),nombre,edad:parseInt(f.a.value)||null,posicion:f.p.value,categoria:f.c.value.trim(),caracteristicas:f.k.value.trim()});$("dlg").close()}catch(e){alert("No se pudo guardar.")}}},"Guardar")));
 }
 
 /* ---------- Citaciones ---------- */
@@ -136,7 +141,7 @@ function newMatch(){
   const f={r:h("input",{placeholder:"Rival"}),d:h("input",{type:"date"}),t:h("input",{placeholder:"Torneo / zona / fecha"}),l:h("input",{placeholder:"Lugar"}),f:h("select",{value:"4-4-2"},FORM.map(x=>h("option",{value:x},x)))};
   dlg(h("h2",{style:"margin:0"},"Nueva citación"),h("label",{},"Rival"),f.r,h("label",{},"Fecha"),f.d,h("label",{},"Torneo"),f.t,h("label",{},"Lugar"),f.l,h("label",{},"Formación"),f.f,
     h("div",{class:"foot"},h("button",{class:"sec",onclick:()=>$("dlg").close()},"Cancelar"),h("button",{onclick:async()=>{
-      const m={id:"m"+uid(),rival:f.r.value.trim(),fecha:f.d.value,torneo:f.t.value.trim(),lugar:f.l.value.trim(),formacion:f.f.value,tit:{},sup:[],staff:"",gf:null,gc:null,st:{}};
+      const m={id:"m"+rid(),rival:f.r.value.trim(),fecha:f.d.value,torneo:f.t.value.trim(),lugar:f.l.value.trim(),formacion:f.f.value,tit:{},sup:[],staff:"",gf:null,gc:null,st:{}};
       try{await put("matches",m,true);D.matches.some(x=>x.id===m.id)||D.matches.push(m);cur=m;v="match";$("dlg").close();render()}catch(e){alert("No se pudo crear.")}}},"Crear")));
 }
 function pick(onPick,onClear){
@@ -233,24 +238,36 @@ function viewStats(){
 }
 
 function dlJson(){const a=document.createElement("a");a.href=URL.createObjectURL(new Blob([JSON.stringify(D)],{type:"application/json"}));a.download="copia-plantel.json";a.click()}
-async function impJson(e){const f=e.target.files[0];if(!f)return;try{const j=JSON.parse(await f.text());if(!confirm("Esto reemplaza los datos actuales de este navegador. ¿Continuar?"))return;for(const c of ["players","matches"]){D[c]=Array.isArray(j[c])?j[c]:[];persist(c)}render()}catch(x){alert("Archivo no válido.")}}
+async function impJson(e){const f=e.target.files[0];e.target.value="";if(!f)return;try{const j=JSON.parse(await f.text());const n=(j.players||[]).length+(j.matches||[]).length;if(!n||!confirm("Se van a agregar "+n+" registros a este equipo (si ya existen, se pisan). ¿Continuar?"))return;const b=fs.batch();let k=0;for(const c of ["players","matches"])for(const r of j[c]||[]){if(!r.id)continue;const{id,...d}=r;b.set(col(c).doc(id),d);k++}await b.commit();alert("Se importaron "+k+" registros.")}catch(x){alert("Archivo no válido.")}}
 /* ---------- Shell ---------- */
 function render(){
+  if(!uid){$("nav").textContent="";const a=$("app");a.textContent="";a.append(loginView());return}
   const T=[["db","Base de datos"],["matches","Citaciones"],["stats","Estadísticas"]];
   $("nav").textContent="";T.forEach(([k,t])=>$("nav").append(h("button",{class:(v===k||(v==="match"&&k==="matches"))?"on":"",onclick:()=>{clearTimeout(tm);v=k;render()}},t)));
+  $("nav").append(h("span",{style:"margin-left:auto;display:flex;gap:8px;align-items:center;color:var(--mu)"},"👤 "+uname,h("button",{class:"sec",onclick:()=>auth.signOut()},"Salir")));
   const a=$("app");a.textContent="";a.append(...(v==="db"?viewDb():v==="matches"?viewMatches():v==="match"?viewMatch():viewStats()));
 }
-(async function init(){
-  let user=null;try{user=await claude.use("user");db=await claude.use("db")}catch(e){}
-  if(db){
-    canEdit=user?user.canEdit():false;
-    for(const c of ["players","matches"])db.collection(c).onSnapshot(s=>{D[c]=s.docs.map(d=>({id:d.id,...d.data()}));if(v!=="match")render()},()=>{$("note").textContent="Error al leer los datos."});
-  }else{
-    local=true;canEdit=true;
-    for(const c of ["players","matches"])try{D[c]=JSON.parse(localStorage.getItem("gp_"+c)||"[]")}catch(e){}
-    $("note").append("Los datos se guardan solo en este navegador y dispositivo. Hacé copias de seguridad seguido. ",h("button",{class:"sec",onclick:dlJson},"Exportar copia"),"  ",h("button",{class:"sec",onclick:()=>$("imp").click()},"Importar copia"),h("input",{id:"imp",type:"file",accept:".json",hidden:true,onchange:impJson}));
-  }
+/* ---------- Firebase ---------- */
+const FIREBASE_CONFIG={apiKey:"AIzaSyCLL6CnhL63IybBsYUdjlIY8zt-rP1hedA",authDomain:"plantel-club.firebaseapp.com",projectId:"plantel-club",storageBucket:"plantel-club.firebasestorage.app",messagingSenderId:"769454677064",appId:"1:769454677064:web:3d13b021c52014a56ccc7d"};
+const mail=u=>u.trim().toLowerCase().replace(/[^a-z0-9._-]/g,"")+"@plantel.example.com";
+function loginView(){
+  const u=h("input",{placeholder:"Usuario",autocomplete:"username",autocapitalize:"none"}),p=h("input",{type:"password",placeholder:"Contraseña",autocomplete:"current-password"}),msg=h("p",{class:"sub",style:"color:var(--dg)"});
+  const go=async()=>{msg.textContent="";const n=u.value.trim().toLowerCase();if(!n||!p.value){msg.textContent="Completá usuario y contraseña.";return}
+    try{await auth.signInWithEmailAndPassword(mail(n),p.value)}catch(e){msg.textContent=["auth/invalid-credential","auth/user-not-found","auth/wrong-password","auth/invalid-email"].includes(e.code)?"Usuario o contraseña incorrectos.":"No se pudo ingresar. Revisá tu conexión."}};
+  p.onkeydown=e=>{if(e.key==="Enter")go()};
+  return h("div",{class:"card",style:"max-width:360px;margin:40px auto"},h("h2",{style:"margin:0 0 8px"},"Ingresar"),h("label",{},"Usuario"),u,h("label",{},"Contraseña"),p,msg,h("div",{class:"foot"},h("button",{onclick:go},"Entrar")));
+}
+function start(user){
+  uid=user.uid;uname=user.email.split("@")[0];canEdit=true;D={players:[],matches:[]};v="db";
+  unsubs=["players","matches"].map(c=>col(c).onSnapshot(s=>{D[c]=s.docs.map(d=>({id:d.id,...d.data()}));if(v!=="match")render()},()=>{$("note").textContent="No se pudieron leer los datos."}));
+  const n=$("note");n.textContent="Tus datos se guardan en la nube y los ves desde cualquier dispositivo. ";
+  n.append(h("button",{class:"sec",onclick:dlJson},"Exportar copia"),"  ",h("button",{class:"sec",onclick:()=>$("imp").click()},"Importar copia"),h("input",{id:"imp",type:"file",accept:".json",hidden:true,onchange:impJson}));
   render();
+}
+(function init(){
+  if(FIREBASE_CONFIG.apiKey==="PEGAR_AQUI"){$("app").append(h("div",{class:"empty"},"Falta pegar la configuración de Firebase en este archivo."));return}
+  firebase.initializeApp(FIREBASE_CONFIG);auth=firebase.auth();fs=firebase.firestore();
+  auth.onAuthStateChanged(u=>{unsubs.forEach(f=>f());unsubs=[];clearTimeout(tm);if(u)start(u);else{uid=null;D={players:[],matches:[]};v="db";cur=null;$("note").textContent="";render()}});
 })();
 </script>
 </body>
